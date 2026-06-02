@@ -64,7 +64,8 @@ plt.rcParams["axes.unicode_minus"] = False
 plt.rcParams.update({'font.size': 14}) 
 
 # 確保路徑與你實際存放 .pth 和 .pkl 的資料夾一致
-BASE_DIR = Path(r"C:\RUL_project\data")
+# 改為自動抓取當前資料夾的路徑
+BASE_DIR = Path(__file__).parent
 MODEL_PATH = BASE_DIR / "lstm_attention_best_search.pth"
 FEATURE_SCALER_PATH = BASE_DIR / "feature_scaler.pkl"
 TARGET_SCALER_PATH = BASE_DIR / "target_scaler.pkl"
