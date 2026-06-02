@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import joblib
 import io
-import matplotlib.pyplot as plt
 from pathlib import Path
 import os
 
@@ -30,11 +29,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-plt.style.use("default")
-plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei"]
-plt.rcParams["axes.unicode_minus"] = False
-plt.rcParams.update({'font.size': 14}) 
-
 # 雲端自動抓取當前路徑
 BASE_DIR = Path(__file__).parent
 MODEL_PATH = BASE_DIR / "lstm_attention_best_search.pth"
@@ -45,6 +39,7 @@ SEQUENCE_LENGTH = 120
 SMOOTHING_WINDOW = 30
 NOMINAL_LIFESPAN = 7200.0  
 
+# 模型嚴格需要的 9 個特徵
 MODEL_FEATURES = ["RPM", "Vm", "CH1", "CH2", "dB", "Im", "Time_Step", "Vm_std", "dB_std"]
 
 COLUMN_RENAME_MAP = {
@@ -300,7 +295,6 @@ with tab2:
             else:
                 df_upload = pd.read_excel(uploaded_file)
                 
-            # ★ 修復畫圖 Bug：第一時間確認 Time_Step 存在於母表中
             if "Time_Step" not in df_upload.columns:
                 if "Time" in df_upload.columns:
                     df_upload["Time_Step"] = df_upload["Time"]
@@ -385,18 +379,16 @@ with tab2:
                         st.markdown("---")
                         st.markdown("### RUL 剩餘壽命趨勢圖")
                         
-                        fig, ax = plt.subplots(figsize=(12, 6))
+                        # ★ 捨棄 Matplotlib，改用 Streamlit 內建高階互動圖表
+                        chart_data = pd.DataFrame()
+                        chart_data["預測 RUL (s)"] = df_upload["預測 RUL (s)"].values
                         if "RUL" in df_upload.columns:
-                            ax.plot(df_upload["Time_Step"], df_upload["RUL"], color='#0056b3', linewidth=2.5, label="真實 RUL")
+                            chart_data["真實 RUL"] = df_upload["RUL"].values
+                            
+                        chart_data.index = df_upload["Time_Step"]
                         
-                        # ★ 時間軸問題已修復，現在會正常繪製
-                        ax.plot(df_upload["Time_Step"], df_upload["預測 RUL (s)"], color='#ff8c00', linestyle='--', linewidth=2.5, label="預測 RUL")
-                        ax.set_xlabel("時間(s)", fontsize=16, fontweight='bold')
-                        ax.set_ylabel("剩餘使用壽命(s)", fontsize=16, fontweight='bold')
-                        ax.tick_params(axis='both', which='major', labelsize=14)
-                        ax.legend(fontsize=14)
-                        ax.grid(True, alpha=0.4, linestyle='--')
-                        st.pyplot(fig)
+                        # 繪製圖表 (中文字體 100% 完美支援，且滑鼠可懸停看數值)
+                        st.line_chart(chart_data)
                         
         except Exception as e:
             st.error(f"檔案讀取或處理時發生錯誤: {e}")
