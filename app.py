@@ -162,7 +162,7 @@ def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
     for col in ["Vm", "dB"]:
         df[f"{col}_std"] = 0.0
             
-    scaled_features = feature_scaler.transform(df[FEATURE_COLS])
+    scaled_features = feature_scaler.transform(df[FEATURE_COLS].values)
     tensor_x = torch.FloatTensor(scaled_features).unsqueeze(0)
     return tensor_x
 
@@ -182,7 +182,7 @@ def process_batch_input(df):
     for col in req_cols:
         df_processed[col] = df_processed[col].rolling(window=SMOOTHING_WINDOW, min_periods=1, center=False).mean()
         
-    scaled_features = feature_scaler.transform(df_processed[FEATURE_COLS])
+    scaled_features = feature_scaler.transform(df_processed[FEATURE_COLS].values)
     
     if len(scaled_features) < SEQUENCE_LENGTH:
         return None, f"資料筆數 ({len(scaled_features)}) 太少，模型需要至少 {SEQUENCE_LENGTH} 筆連續資料才能進行預測。"
