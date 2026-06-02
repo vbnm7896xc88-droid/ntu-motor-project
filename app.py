@@ -45,7 +45,6 @@ SEQUENCE_LENGTH = 120
 SMOOTHING_WINDOW = 30
 NOMINAL_LIFESPAN = 7200.0  
 
-# 模型嚴格需要的 9 個特徵
 MODEL_FEATURES = ["RPM", "Vm", "CH1", "CH2", "dB", "Im", "Time_Step", "Vm_std", "dB_std"]
 
 COLUMN_RENAME_MAP = {
@@ -101,62 +100,52 @@ def load_artifacts():
         f_scaler = joblib.load(FEATURE_SCALER_PATH)
         t_scaler = joblib.load(TARGET_SCALER_PATH)
         
-        if hasattr(f_scaler, 'feature_names_in_'):
-            scaler_features = list(f_scaler.feature_names_in_)
-        else:
-            scaler_features = MODEL_FEATURES
-            
+        scaler_dim = getattr(f_scaler, 'n_features_in_', 9)
+        
         model = RUL_LSTM_Attention(input_dim=9, hidden_dim=128, num_layers=2).to(device)
         model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
         model.eval()
         
-        return model, f_scaler, t_scaler, device, scaler_features
+        return model, f_scaler, t_scaler, device, scaler_dim
     except Exception as e:
         st.error(f"模型或縮放器載入失敗: {e}")
         st.stop()
 
-model, feature_scaler, target_scaler, device, SCALER_FEATURES = load_artifacts()
+model, feature_scaler, target_scaler, device, SCALER_DIM = load_artifacts()
 
 # ==========================================
 # 4. 後台邏輯處理區
 # ==========================================
 def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
-    data = {col: [0.0] * SEQUENCE_LENGTH for col in SCALER_FEATURES}
-    
-    data["RPM"] = [rpm] * SEQUENCE_LENGTH
-    data["Vm"] = [vm] * SEQUENCE_LENGTH
-    data["CH1"] = [ch1] * SEQUENCE_LENGTH
-    data["CH2"] = [ch2] * SEQUENCE_LENGTH
-    data["dB"] = [db] * SEQUENCE_LENGTH
-    data["Im"] = [im] * SEQUENCE_LENGTH
-    
+    data = {
+        "RPM": [rpm] * SEQUENCE_LENGTH,
+        "Vm": [vm] * SEQUENCE_LENGTH,
+        "CH1": [ch1] * SEQUENCE_LENGTH,
+        "CH2": [ch2] * SEQUENCE_LENGTH,
+        "dB": [db] * SEQUENCE_LENGTH,
+        "Im": [im] * SEQUENCE_LENGTH,
+    }
     df = pd.DataFrame(data)
     
     start_step = max(1, current_time_step - SEQUENCE_LENGTH + 1)
     df["Time_Step"] = np.arange(start_step, start_step + SEQUENCE_LENGTH)
     
-    smooth_cols = ["RPM", "Vm", "CH1", "CH2", "dB", "Im"]
-    for col in smooth_cols:
-        if col in df.columns:
-            df[col] = df[col].ewm(span=SMOOTHING_WINDOW, adjust=False).mean()
+    for col in ["RPM", "Vm", "CH1", "CH2", "dB", "Im"]:
+        df[col] = df[col].ewm(span=SMOOTHING_WINDOW, adjust=False).mean()
             
-    for col in ["Vm_std", "dB_std"]:
-        if col in df.columns:
-            df[col] = 0.0
+    df["Vm_std"] = 0.0
+    df["dB_std"] = 0.0
             
-    scaled_all = feature_scaler.transform(df[SCALER_FEATURES])
+    df_final = df[MODEL_FEATURES]
     
-    # ★ 高容錯特徵位置映射機制 (避免 list.index 找不到名字而報錯)
-    feature_indices = []
-    for idx, col in enumerate(MODEL_FEATURES):
-        if col in SCALER_FEATURES:
-            feature_indices.append(SCALER_FEATURES.index(col))
-        else:
-            # 若加工欄位不在縮放器中，自動安全映射，防當機
-            feature_indices.append(idx % len(SCALER_FEATURES))
-            
-    scaled_model_features = scaled_all[:, feature_indices]
-    tensor_x = torch.FloatTensor(scaled_model_features).unsqueeze(0)
+    try:
+        scaled_features = feature_scaler.transform(df_final.values)
+    except ValueError:
+        pad_df = np.zeros((len(df_final), SCALER_DIM))
+        pad_df[:, :9] = df_final.values
+        scaled_features = feature_scaler.transform(pad_df)[:, :9]
+        
+    tensor_x = torch.FloatTensor(scaled_features).unsqueeze(0)
     return tensor_x
 
 def process_batch_input(df):
@@ -167,37 +156,28 @@ def process_batch_input(df):
     
     df_processed = df.copy()
     
-    if "Time_Step" not in df_processed.columns:
-        df_processed["Time_Step"] = np.arange(1, len(df_processed) + 1)
     for col in ["Vm", "dB"]:
         if f"{col}_std" not in df_processed.columns:
             df_processed[f"{col}_std"] = 0.0
-            
-    for col in SCALER_FEATURES:
-        if col not in df_processed.columns:
-            df_processed[col] = 0.0
 
     for col in req_cols:
         df_processed[col] = df_processed[col].rolling(window=SMOOTHING_WINDOW, min_periods=1, center=False).mean()
         
-    scaled_all = feature_scaler.transform(df_processed[SCALER_FEATURES])
+    df_final = df_processed[MODEL_FEATURES]
     
-    # ★ 同步在批次處理中加入高容錯特徵映射
-    feature_indices = []
-    for idx, col in enumerate(MODEL_FEATURES):
-        if col in SCALER_FEATURES:
-            feature_indices.append(SCALER_FEATURES.index(col))
-        else:
-            feature_indices.append(idx % len(SCALER_FEATURES))
-            
-    scaled_model_features = scaled_all[:, feature_indices]
+    try:
+        scaled_features = feature_scaler.transform(df_final.values)
+    except ValueError:
+        pad_df = np.zeros((len(df_final), SCALER_DIM))
+        pad_df[:, :9] = df_final.values
+        scaled_features = feature_scaler.transform(pad_df)[:, :9]
     
-    if len(scaled_model_features) < SEQUENCE_LENGTH:
-        return None, f"資料筆數 ({len(scaled_model_features)}) 太少，模型需要至少 {SEQUENCE_LENGTH} 筆連續資料才能進行預測。"
+    if len(scaled_features) < SEQUENCE_LENGTH:
+        return None, f"資料筆數太少，模型需要至少 {SEQUENCE_LENGTH} 筆連續資料才能進行預測。"
 
     windows = []
-    for i in range(len(scaled_model_features) - SEQUENCE_LENGTH + 1):
-        windows.append(scaled_model_features[i : i + SEQUENCE_LENGTH])
+    for i in range(len(scaled_features) - SEQUENCE_LENGTH + 1):
+        windows.append(scaled_features[i : i + SEQUENCE_LENGTH])
         
     tensor_x = torch.FloatTensor(np.array(windows)).to(device)
     return tensor_x, None
@@ -213,6 +193,10 @@ def highlight_health_status(val):
 # ==========================================
 
 st.title("馬達狀態預測系統")
+
+if SCALER_DIM != 9:
+    st.error(f"🚨 **嚴重警告：縮放器檔案錯誤！**\n\n系統偵測到您上傳至 GitHub 的 `feature_scaler.pkl` 包含了 **{SCALER_DIM} 個特徵**，但您的模型是用 **9 個特徵** 訓練的。請上傳正確的檔案覆蓋。")
+
 st.markdown("請選擇「實時單筆預測」或是「批次檔案上傳」來評估馬達的剩餘使用壽命 (RUL) 與健康指數。")
 st.markdown("---")
 
@@ -316,6 +300,13 @@ with tab2:
             else:
                 df_upload = pd.read_excel(uploaded_file)
                 
+            # ★ 修復畫圖 Bug：第一時間確認 Time_Step 存在於母表中
+            if "Time_Step" not in df_upload.columns:
+                if "Time" in df_upload.columns:
+                    df_upload["Time_Step"] = df_upload["Time"]
+                else:
+                    df_upload["Time_Step"] = np.arange(1, len(df_upload) + 1)
+                
             df_preview = df_upload.head().rename(columns=COLUMN_RENAME_MAP)
             df_preview = df_preview.loc[:, ~df_preview.columns.duplicated()]
             preview_cols = [c for c in df_preview.columns if not str(c).endswith("_std") and c != "時間序列"]
@@ -397,6 +388,8 @@ with tab2:
                         fig, ax = plt.subplots(figsize=(12, 6))
                         if "RUL" in df_upload.columns:
                             ax.plot(df_upload["Time_Step"], df_upload["RUL"], color='#0056b3', linewidth=2.5, label="真實 RUL")
+                        
+                        # ★ 時間軸問題已修復，現在會正常繪製
                         ax.plot(df_upload["Time_Step"], df_upload["預測 RUL (s)"], color='#ff8c00', linestyle='--', linewidth=2.5, label="預測 RUL")
                         ax.set_xlabel("時間(s)", fontsize=16, fontweight='bold')
                         ax.set_ylabel("剩餘使用壽命(s)", fontsize=16, fontweight='bold')
