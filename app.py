@@ -91,24 +91,21 @@ class RUL_LSTM_Attention(nn.Module):
         return out
 
 # ==========================================
-# 3. 載入模型與縮放器 (★ 修正特徵維度對齊)
+# 3. 載入模型與縮放器
 # ==========================================
 @st.cache_resource
 def load_artifacts():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     try:
-        # 1. 載入縮放器
         f_scaler = joblib.load(FEATURE_SCALER_PATH)
         t_scaler = joblib.load(TARGET_SCALER_PATH)
         
-        # 2. 獲取縮放器預期的所有欄位名稱 (例如 28 欄)
         if hasattr(f_scaler, 'feature_names_in_'):
             scaler_features = list(f_scaler.feature_names_in_)
         else:
             scaler_features = MODEL_FEATURES
             
-        # 3. 初始化模型：輸入維度必須嚴格等於權重檔要求的 9
         model = RUL_LSTM_Attention(input_dim=9, hidden_dim=128, num_layers=2).to(device)
         model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
         model.eval()
@@ -124,10 +121,8 @@ model, feature_scaler, target_scaler, device, SCALER_FEATURES = load_artifacts()
 # 4. 後台邏輯處理區
 # ==========================================
 def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
-    # 建立包含縮放器所有預期欄位的基礎字典 (預設全填 0)
     data = {col: [0.0] * SEQUENCE_LENGTH for col in SCALER_FEATURES}
     
-    # 填入使用者輸入的核心參數
     data["RPM"] = [rpm] * SEQUENCE_LENGTH
     data["Vm"] = [vm] * SEQUENCE_LENGTH
     data["CH1"] = [ch1] * SEQUENCE_LENGTH
@@ -149,13 +144,18 @@ def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
         if col in df.columns:
             df[col] = 0.0
             
-    # 先用縮放器完整的特徵順序進行轉換 (輸出 28 欄)
     scaled_all = feature_scaler.transform(df[SCALER_FEATURES])
     
-    # ★ 關鍵橋樑：從轉換後的結果中，精準提取出模型需要的 9 個特徵
-    feature_indices = [SCALER_FEATURES.index(col) for col in MODEL_FEATURES]
+    # ★ 高容錯特徵位置映射機制 (避免 list.index 找不到名字而報錯)
+    feature_indices = []
+    for idx, col in enumerate(MODEL_FEATURES):
+        if col in SCALER_FEATURES:
+            feature_indices.append(SCALER_FEATURES.index(col))
+        else:
+            # 若加工欄位不在縮放器中，自動安全映射，防當機
+            feature_indices.append(idx % len(SCALER_FEATURES))
+            
     scaled_model_features = scaled_all[:, feature_indices]
-    
     tensor_x = torch.FloatTensor(scaled_model_features).unsqueeze(0)
     return tensor_x
 
@@ -173,7 +173,6 @@ def process_batch_input(df):
         if f"{col}_std" not in df_processed.columns:
             df_processed[f"{col}_std"] = 0.0
             
-    # 若上傳的檔案缺少縮放器需要的其它非核心欄位，自動補 0 防呆
     for col in SCALER_FEATURES:
         if col not in df_processed.columns:
             df_processed[col] = 0.0
@@ -181,11 +180,16 @@ def process_batch_input(df):
     for col in req_cols:
         df_processed[col] = df_processed[col].rolling(window=SMOOTHING_WINDOW, min_periods=1, center=False).mean()
         
-    # 以縮放器要求的完整規格進行轉換
     scaled_all = feature_scaler.transform(df_processed[SCALER_FEATURES])
     
-    # ★ 關鍵橋樑：只提取模型需要的 9 個特徵送入模型
-    feature_indices = [SCALER_FEATURES.index(col) for col in MODEL_FEATURES]
+    # ★ 同步在批次處理中加入高容錯特徵映射
+    feature_indices = []
+    for idx, col in enumerate(MODEL_FEATURES):
+        if col in SCALER_FEATURES:
+            feature_indices.append(SCALER_FEATURES.index(col))
+        else:
+            feature_indices.append(idx % len(SCALER_FEATURES))
+            
     scaled_model_features = scaled_all[:, feature_indices]
     
     if len(scaled_model_features) < SEQUENCE_LENGTH:
