@@ -35,7 +35,7 @@ plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei"]
 plt.rcParams["axes.unicode_minus"] = False
 plt.rcParams.update({'font.size': 14}) 
 
-# 改為自動抓取當前資料夾的路徑 (適應雲端環境)
+# 雲端自動抓取當前路徑
 BASE_DIR = Path(__file__).parent
 MODEL_PATH = BASE_DIR / "lstm_attention_best_search.pth"
 FEATURE_SCALER_PATH = BASE_DIR / "feature_scaler.pkl"
@@ -44,6 +44,9 @@ TARGET_SCALER_PATH = BASE_DIR / "target_scaler.pkl"
 SEQUENCE_LENGTH = 120
 SMOOTHING_WINDOW = 30
 NOMINAL_LIFESPAN = 7200.0  
+
+# 模型嚴格需要的 9 個特徵
+MODEL_FEATURES = ["RPM", "Vm", "CH1", "CH2", "dB", "Im", "Time_Step", "Vm_std", "dB_std"]
 
 COLUMN_RENAME_MAP = {
     "Time": "時間序列", 
@@ -88,49 +91,50 @@ class RUL_LSTM_Attention(nn.Module):
         return out
 
 # ==========================================
-# 3. 載入模型與縮放器 (★ 加入自動偵測機制)
+# 3. 載入模型與縮放器 (★ 修正特徵維度對齊)
 # ==========================================
 @st.cache_resource
 def load_artifacts():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     try:
-        # 1. 先載入縮放器
+        # 1. 載入縮放器
         f_scaler = joblib.load(FEATURE_SCALER_PATH)
         t_scaler = joblib.load(TARGET_SCALER_PATH)
         
-        # 2. 自動偵測當初訓練時的特徵名稱與數量
+        # 2. 獲取縮放器預期的所有欄位名稱 (例如 28 欄)
         if hasattr(f_scaler, 'feature_names_in_'):
-            expected_cols = list(f_scaler.feature_names_in_)
+            scaler_features = list(f_scaler.feature_names_in_)
         else:
-            # 防呆：如果當初訓練沒存欄位名稱，就只抓需要的數量
-            core_cols = ["RPM", "Vm", "CH1", "CH2", "dB", "Im", "Time_Step", "Vm_std", "dB_std"]
-            expected_cols = core_cols[:f_scaler.n_features_in_]
+            scaler_features = MODEL_FEATURES
             
-        # 3. 根據偵測到的數量，動態設定模型的 input_dim
-        model = RUL_LSTM_Attention(input_dim=len(expected_cols), hidden_dim=128, num_layers=2).to(device)
+        # 3. 初始化模型：輸入維度必須嚴格等於權重檔要求的 9
+        model = RUL_LSTM_Attention(input_dim=9, hidden_dim=128, num_layers=2).to(device)
         model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
         model.eval()
         
-        return model, f_scaler, t_scaler, device, expected_cols
+        return model, f_scaler, t_scaler, device, scaler_features
     except Exception as e:
-        st.error(f"模型或縮放器載入失敗，請確認檔案是否存在: {e}")
+        st.error(f"模型或縮放器載入失敗: {e}")
         st.stop()
 
-model, feature_scaler, target_scaler, device, EXPECTED_COLS = load_artifacts()
+model, feature_scaler, target_scaler, device, SCALER_FEATURES = load_artifacts()
 
 # ==========================================
 # 4. 後台邏輯處理區
 # ==========================================
 def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
-    data = {
-        "RPM": [rpm] * SEQUENCE_LENGTH,
-        "Vm": [vm] * SEQUENCE_LENGTH,
-        "CH1": [ch1] * SEQUENCE_LENGTH,
-        "CH2": [ch2] * SEQUENCE_LENGTH,
-        "dB": [db] * SEQUENCE_LENGTH,
-        "Im": [im] * SEQUENCE_LENGTH,
-    }
+    # 建立包含縮放器所有預期欄位的基礎字典 (預設全填 0)
+    data = {col: [0.0] * SEQUENCE_LENGTH for col in SCALER_FEATURES}
+    
+    # 填入使用者輸入的核心參數
+    data["RPM"] = [rpm] * SEQUENCE_LENGTH
+    data["Vm"] = [vm] * SEQUENCE_LENGTH
+    data["CH1"] = [ch1] * SEQUENCE_LENGTH
+    data["CH2"] = [ch2] * SEQUENCE_LENGTH
+    data["dB"] = [db] * SEQUENCE_LENGTH
+    data["Im"] = [im] * SEQUENCE_LENGTH
+    
     df = pd.DataFrame(data)
     
     start_step = max(1, current_time_step - SEQUENCE_LENGTH + 1)
@@ -138,14 +142,21 @@ def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
     
     smooth_cols = ["RPM", "Vm", "CH1", "CH2", "dB", "Im"]
     for col in smooth_cols:
-        df[col] = df[col].ewm(span=SMOOTHING_WINDOW, adjust=False).mean()
+        if col in df.columns:
+            df[col] = df[col].ewm(span=SMOOTHING_WINDOW, adjust=False).mean()
             
-    for col in ["Vm", "dB"]:
-        df[f"{col}_std"] = 0.0
+    for col in ["Vm_std", "dB_std"]:
+        if col in df.columns:
+            df[col] = 0.0
             
-    # ★ 只提取模型「真正需要」的特徵，完美避開驗證錯誤
-    scaled_features = feature_scaler.transform(df[EXPECTED_COLS])
-    tensor_x = torch.FloatTensor(scaled_features).unsqueeze(0)
+    # 先用縮放器完整的特徵順序進行轉換 (輸出 28 欄)
+    scaled_all = feature_scaler.transform(df[SCALER_FEATURES])
+    
+    # ★ 關鍵橋樑：從轉換後的結果中，精準提取出模型需要的 9 個特徵
+    feature_indices = [SCALER_FEATURES.index(col) for col in MODEL_FEATURES]
+    scaled_model_features = scaled_all[:, feature_indices]
+    
+    tensor_x = torch.FloatTensor(scaled_model_features).unsqueeze(0)
     return tensor_x
 
 def process_batch_input(df):
@@ -154,25 +165,35 @@ def process_batch_input(df):
     if missing:
         return None, f"上傳的檔案缺少必要欄位: {', '.join(missing)}"
     
-    if "Time_Step" not in df.columns:
-        df["Time_Step"] = np.arange(1, len(df) + 1)
-    for col in ["Vm", "dB"]:
-        if f"{col}_std" not in df.columns:
-            df[f"{col}_std"] = 0.0
-
     df_processed = df.copy()
+    
+    if "Time_Step" not in df_processed.columns:
+        df_processed["Time_Step"] = np.arange(1, len(df_processed) + 1)
+    for col in ["Vm", "dB"]:
+        if f"{col}_std" not in df_processed.columns:
+            df_processed[f"{col}_std"] = 0.0
+            
+    # 若上傳的檔案缺少縮放器需要的其它非核心欄位，自動補 0 防呆
+    for col in SCALER_FEATURES:
+        if col not in df_processed.columns:
+            df_processed[col] = 0.0
+
     for col in req_cols:
         df_processed[col] = df_processed[col].rolling(window=SMOOTHING_WINDOW, min_periods=1, center=False).mean()
         
-    # ★ 批次處理同樣只提取需要的特徵
-    scaled_features = feature_scaler.transform(df_processed[EXPECTED_COLS])
+    # 以縮放器要求的完整規格進行轉換
+    scaled_all = feature_scaler.transform(df_processed[SCALER_FEATURES])
     
-    if len(scaled_features) < SEQUENCE_LENGTH:
-        return None, f"資料筆數 ({len(scaled_features)}) 太少，模型需要至少 {SEQUENCE_LENGTH} 筆連續資料才能進行預測。"
+    # ★ 關鍵橋樑：只提取模型需要的 9 個特徵送入模型
+    feature_indices = [SCALER_FEATURES.index(col) for col in MODEL_FEATURES]
+    scaled_model_features = scaled_all[:, feature_indices]
+    
+    if len(scaled_model_features) < SEQUENCE_LENGTH:
+        return None, f"資料筆數 ({len(scaled_model_features)}) 太少，模型需要至少 {SEQUENCE_LENGTH} 筆連續資料才能進行預測。"
 
     windows = []
-    for i in range(len(scaled_features) - SEQUENCE_LENGTH + 1):
-        windows.append(scaled_features[i : i + SEQUENCE_LENGTH])
+    for i in range(len(scaled_model_features) - SEQUENCE_LENGTH + 1):
+        windows.append(scaled_model_features[i : i + SEQUENCE_LENGTH])
         
     tensor_x = torch.FloatTensor(np.array(windows)).to(device)
     return tensor_x, None
@@ -184,7 +205,7 @@ def highlight_health_status(val):
     return ''
 
 # ==========================================
-# 5. UI 介面設計與排版
+# 5. UI 介面設計
 # ==========================================
 
 st.title("馬達狀態預測系統")
