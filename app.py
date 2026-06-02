@@ -5,8 +5,10 @@ import torch
 import torch.nn as nn
 import joblib
 import io
+import matplotlib.pyplot as plt
 from pathlib import Path
 import os
+import altair as alt
 
 # ==========================================
 # 1. 介面與環境設定
@@ -28,6 +30,11 @@ st.markdown("""
     [data-testid="stDataFrame"] div[role="columnheader"] { text-align: left !important; justify-content: flex-start !important; }
     </style>
 """, unsafe_allow_html=True)
+
+plt.style.use("default")
+plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei"]
+plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams.update({'font.size': 14}) 
 
 # 雲端自動抓取當前路徑
 BASE_DIR = Path(__file__).parent
@@ -227,6 +234,7 @@ with tab1:
                     pred_scaled = model(input_tensor).cpu().numpy()
                 
                 pred_raw = target_scaler.inverse_transform(pred_scaled).item()
+                # 確保不輸出負值的剩餘壽命
                 final_rul = max(0.0, float(pred_raw))
                 
                 health_pct = min(100.0, max(0.0, (final_rul / NOMINAL_LIFESPAN) * 100))
@@ -319,6 +327,7 @@ with tab2:
                             preds_scaled = model(tensor_x).cpu().numpy()
                             
                         preds_raw = target_scaler.inverse_transform(preds_scaled).flatten()
+                        # 確保不輸出負值的剩餘壽命
                         preds_final = np.clip(preds_raw, 0.0, None)
                         
                         pad_length = SEQUENCE_LENGTH - 1
@@ -379,16 +388,28 @@ with tab2:
                         st.markdown("---")
                         st.markdown("### RUL 剩餘壽命趨勢圖")
                         
-                        # ★ 捨棄 Matplotlib，改用 Streamlit 內建高階互動圖表
+                        # 準備圖表資料
                         chart_data = pd.DataFrame()
                         chart_data["預測 RUL (s)"] = df_upload["預測 RUL (s)"].values
                         if "RUL" in df_upload.columns:
                             chart_data["真實 RUL"] = df_upload["RUL"].values
                             
+                        # 設定 X 軸的索引名稱
                         chart_data.index = df_upload["Time_Step"]
+                        chart_data.index.name = "時間(s)"
                         
-                        # 繪製圖表 (中文字體 100% 完美支援，且滑鼠可懸停看數值)
-                        st.line_chart(chart_data)
+                        try:
+                            # 嘗試使用最新版 Streamlit 的 x_label / y_label 參數
+                            st.line_chart(chart_data, x_label="時間(s)", y_label="剩餘使用壽命(s)")
+                        except TypeError:
+                            # 如果雲端 Streamlit 版本較舊，自動切換至 Altair 引擎繪製高階圖表 (確保標籤 100% 顯示)
+                            df_melt = chart_data.reset_index().melt("時間(s)", var_name="指標", value_name="剩餘使用壽命(s)")
+                            chart = alt.Chart(df_melt).mark_line().encode(
+                                x=alt.X("時間(s):Q", title="時間(s)"),
+                                y=alt.Y("剩餘使用壽命(s):Q", title="剩餘使用壽命(s)"),
+                                color=alt.Color("指標:N", title="圖例")
+                            ).interactive()
+                            st.altair_chart(chart, use_container_width=True)
                         
         except Exception as e:
             st.error(f"檔案讀取或處理時發生錯誤: {e}")
