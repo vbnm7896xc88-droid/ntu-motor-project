@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import joblib
 import io
-import matplotlib.pyplot as plt
 from pathlib import Path
 import os
 import altair as alt
@@ -30,11 +29,6 @@ st.markdown("""
     [data-testid="stDataFrame"] div[role="columnheader"] { text-align: left !important; justify-content: flex-start !important; }
     </style>
 """, unsafe_allow_html=True)
-
-plt.style.use("default")
-plt.rcParams["font.sans-serif"] = ["Microsoft JhengHei"]
-plt.rcParams["axes.unicode_minus"] = False
-plt.rcParams.update({'font.size': 14}) 
 
 # 雲端自動抓取當前路徑
 BASE_DIR = Path(__file__).parent
@@ -228,14 +222,17 @@ with tab1:
             actual_im = 4.2 * (in_load_pct / 100.0)
             
             try:
-                input_tensor = process_single_input(in_rpm, in_vm, in_ch1, in_ch2, in_db, actual_im, in_time).to(device)
-                
-                with torch.no_grad():
-                    pred_scaled = model(input_tensor).cpu().numpy()
-                
-                pred_raw = target_scaler.inverse_transform(pred_scaled).item()
-                # 確保不輸出負值的剩餘壽命
-                final_rul = max(0.0, float(pred_raw))
+                # ★ 新增規則：如果轉速為 0，剩餘壽命直接判定為 0
+                if in_rpm <= 0.0:
+                    final_rul = 0.0
+                else:
+                    input_tensor = process_single_input(in_rpm, in_vm, in_ch1, in_ch2, in_db, actual_im, in_time).to(device)
+                    
+                    with torch.no_grad():
+                        pred_scaled = model(input_tensor).cpu().numpy()
+                    
+                    pred_raw = target_scaler.inverse_transform(pred_scaled).item()
+                    final_rul = max(0.0, float(pred_raw))
                 
                 health_pct = min(100.0, max(0.0, (final_rul / NOMINAL_LIFESPAN) * 100))
                 final_rul_mins = final_rul / 60.0
@@ -327,7 +324,6 @@ with tab2:
                             preds_scaled = model(tensor_x).cpu().numpy()
                             
                         preds_raw = target_scaler.inverse_transform(preds_scaled).flatten()
-                        # 確保不輸出負值的剩餘壽命
                         preds_final = np.clip(preds_raw, 0.0, None)
                         
                         pad_length = SEQUENCE_LENGTH - 1
@@ -340,7 +336,11 @@ with tab2:
                         full_predictions = np.concatenate([pad_array, preds_final])
                         df_upload["預測 RUL (s)"] = np.round(full_predictions).astype(int)
                         
-                        health_pcts = np.clip((full_predictions / NOMINAL_LIFESPAN) * 100, 0, 100)
+                        # ★ 新增規則：強制將所有原始轉速 <= 0 的資料點，剩餘壽命壓制為 0
+                        if "RPM" in df_upload.columns:
+                            df_upload.loc[df_upload["RPM"] <= 0, "預測 RUL (s)"] = 0
+                        
+                        health_pcts = np.clip((df_upload["預測 RUL (s)"].values / NOMINAL_LIFESPAN) * 100, 0, 100)
                         def assign_status(pct):
                             if pct > 50: return "良好"
                             elif pct > 20: return "注意"
@@ -348,7 +348,8 @@ with tab2:
                         df_upload["健康等級"] = [assign_status(p) for p in health_pcts]
                         
                         st.markdown("### 檔案末端最新狀態評估 (目前馬達狀態)")
-                        last_rul = preds_final[-1]
+                        # 取出壓制為 0 之後的最後一筆壽命
+                        last_rul = df_upload["預測 RUL (s)"].iloc[-1]
                         last_health_pct = min(100.0, max(0.0, (last_rul / NOMINAL_LIFESPAN) * 100))
                         
                         col_a, col_b = st.columns(2)
@@ -388,21 +389,17 @@ with tab2:
                         st.markdown("---")
                         st.markdown("### RUL 剩餘壽命趨勢圖")
                         
-                        # 準備圖表資料
                         chart_data = pd.DataFrame()
                         chart_data["預測 RUL (s)"] = df_upload["預測 RUL (s)"].values
                         if "RUL" in df_upload.columns:
                             chart_data["真實 RUL"] = df_upload["RUL"].values
                             
-                        # 設定 X 軸的索引名稱
                         chart_data.index = df_upload["Time_Step"]
                         chart_data.index.name = "時間(s)"
                         
                         try:
-                            # 嘗試使用最新版 Streamlit 的 x_label / y_label 參數
                             st.line_chart(chart_data, x_label="時間(s)", y_label="剩餘使用壽命(s)")
                         except TypeError:
-                            # 如果雲端 Streamlit 版本較舊，自動切換至 Altair 引擎繪製高階圖表 (確保標籤 100% 顯示)
                             df_melt = chart_data.reset_index().melt("時間(s)", var_name="指標", value_name="剩餘使用壽命(s)")
                             chart = alt.Chart(df_melt).mark_line().encode(
                                 x=alt.X("時間(s):Q", title="時間(s)"),
