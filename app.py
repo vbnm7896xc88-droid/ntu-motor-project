@@ -14,78 +14,185 @@ st.set_page_config(page_title="馬達預警系統", layout="wide")
 
 # 強制白色背景與黑色文字，避免雲端或瀏覽器深色模式影響
 st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+<style>
+/* ===============================
+   全域白色背景
+================================ */
+html, body, .stApp {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+}
 
-    html, body, .stApp {
-        background-color: #FFFFFF !important;
-        color: #111111 !important;
-    }
+[data-testid="stAppViewContainer"] {
+    background-color: #FFFFFF !important;
+}
 
-    [data-testid="stAppViewContainer"] {
-        background-color: #FFFFFF !important;
-        color: #111111 !important;
-    }
+[data-testid="stHeader"] {
+    background-color: #FFFFFF !important;
+}
 
-    [data-testid="stHeader"] {
-        background-color: #FFFFFF !important;
-    }
+[data-testid="stToolbar"] {
+    background-color: #FFFFFF !important;
+}
 
-    [data-testid="stToolbar"] {
-        background-color: #FFFFFF !important;
-    }
+.block-container {
+    padding-top: 2rem;
+    background-color: #FFFFFF !important;
+}
 
-    .block-container {
-        padding-top: 2rem;
-        background-color: #FFFFFF !important;
-        color: #111111 !important;
-    }
+/* 隱藏 Streamlit 預設選單 */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
 
-    html, body, [class*="st-"] {
-        font-size: 18px !important;
-    }
+/* ===============================
+   文字大小與標題
+================================ */
+html, body, [class*="st-"] {
+    font-size: 18px !important;
+}
 
-    h1 {
-        font-size: 42px !important;
-        font-weight: bold !important;
-        color: #111111 !important;
-    }
+h1 {
+    font-size: 42px !important;
+    font-weight: bold !important;
+    color: #111111 !important;
+}
 
-    h2 {
-        font-size: 36px !important;
-        font-weight: bold !important;
-        color: #222222 !important;
-    }
+h2 {
+    font-size: 36px !important;
+    font-weight: bold !important;
+    color: #222222 !important;
+}
 
-    h3 {
-        font-size: 28px !important;
-        font-weight: bold !important;
-        color: #333333 !important;
-    }
+h3 {
+    font-size: 28px !important;
+    font-weight: bold !important;
+    color: #333333 !important;
+}
 
-    p, label, span, div {
-        color: #111111;
-    }
+p, label, span {
+    color: #111111 !important;
+}
 
-    [data-testid="stMetricValue"] {
-        font-size: 42px !important;
-        font-weight: bold !important;
-        color: #111111 !important;
-    }
+/* ===============================
+   Number input 強制白底
+================================ */
+[data-testid="stNumberInput"] input {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+    border: 1px solid #D0D5DD !important;
+    border-radius: 6px !important;
+}
 
-    [data-testid="stMetricLabel"] {
-        font-size: 22px !important;
-        font-weight: bold !important;
-        color: #333333 !important;
-    }
+[data-testid="stNumberInput"] button {
+    background-color: #F8F9FA !important;
+    color: #111111 !important;
+    border: 1px solid #D0D5DD !important;
+}
 
-    [data-testid="stDataFrame"] div[role="gridcell"],
-    [data-testid="stDataFrame"] div[role="columnheader"] {
-        text-align: left !important;
-        justify-content: flex-start !important;
-    }
-    </style>
+/* ===============================
+   Button 強制白底
+================================ */
+.stButton > button {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+    border: 1px solid #D0D5DD !important;
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+}
+
+.stButton > button:hover {
+    background-color: #F2F4F7 !important;
+    color: #111111 !important;
+    border: 1px solid #98A2B3 !important;
+}
+
+/* ===============================
+   File uploader 強制白底
+================================ */
+[data-testid="stFileUploader"] {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+}
+
+[data-testid="stFileUploaderDropzone"] {
+    background-color: #F8F9FA !important;
+    color: #111111 !important;
+    border: 1px solid #D0D5DD !important;
+    border-radius: 8px !important;
+}
+
+[data-testid="stFileUploaderDropzone"] * {
+    color: #111111 !important;
+}
+
+[data-testid="stFileUploaderFile"] {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+}
+
+/* ===============================
+   Metric 強制白底黑字
+================================ */
+[data-testid="stMetric"] {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 42px !important;
+    font-weight: bold !important;
+    color: #111111 !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 22px !important;
+    font-weight: bold !important;
+    color: #333333 !important;
+}
+
+/* ===============================
+   DataFrame 強制白底
+================================ */
+[data-testid="stDataFrame"] {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+}
+
+[data-testid="stDataFrame"] * {
+    color: #111111 !important;
+}
+
+[data-testid="stDataFrame"] div[role="gridcell"],
+[data-testid="stDataFrame"] div[role="columnheader"] {
+    background-color: #FFFFFF !important;
+    color: #111111 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+}
+
+[data-testid="stDataFrame"] div[role="columnheader"] {
+    background-color: #F8F9FA !important;
+    font-weight: bold !important;
+}
+
+/* ===============================
+   Tabs 白底
+================================ */
+[data-testid="stTabs"] {
+    background-color: #FFFFFF !important;
+}
+
+[data-testid="stTabs"] button {
+    color: #111111 !important;
+}
+
+/* ===============================
+   Altair / chart 容器白底
+================================ */
+[data-testid="stVegaLiteChart"] {
+    background-color: #FFFFFF !important;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # ==========================================
@@ -233,6 +340,26 @@ model, feature_scaler, target_scaler, device, SCALER_DIM = load_artifacts()
 # ==========================================
 # 5. 後台邏輯處理區
 # ==========================================
+def scale_feature_values(df_final):
+    """
+    處理 feature_scaler 的特徵數。
+    正常情況應為 9 個特徵。
+    若 scaler 以前意外儲存到超過 9 個特徵，則用 0 補齊後再取前 9 個。
+    """
+    if SCALER_DIM == 9:
+        return feature_scaler.transform(df_final.values)
+
+    elif SCALER_DIM > 9:
+        pad_df = np.zeros((len(df_final), SCALER_DIM))
+        pad_df[:, :9] = df_final.values
+        return feature_scaler.transform(pad_df)[:, :9]
+
+    else:
+        raise ValueError(
+            f"feature_scaler.pkl 特徵數為 {SCALER_DIM}，小於模型所需的 9 個特徵，請重新上傳正確的 scaler。"
+        )
+
+
 def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
     data = {
         "RPM": [rpm] * SEQUENCE_LENGTH,
@@ -258,13 +385,7 @@ def process_single_input(rpm, vm, ch1, ch2, db, im, current_time_step):
     df["dB_std"] = 0.0
 
     df_final = df[MODEL_FEATURES]
-
-    try:
-        scaled_features = feature_scaler.transform(df_final.values)
-    except ValueError:
-        pad_df = np.zeros((len(df_final), SCALER_DIM))
-        pad_df[:, :9] = df_final.values
-        scaled_features = feature_scaler.transform(pad_df)[:, :9]
+    scaled_features = scale_feature_values(df_final)
 
     tensor_x = torch.FloatTensor(scaled_features).unsqueeze(0)
     return tensor_x
@@ -297,13 +418,7 @@ def process_batch_input(df):
         ).mean()
 
     df_final = df_processed[MODEL_FEATURES]
-
-    try:
-        scaled_features = feature_scaler.transform(df_final.values)
-    except ValueError:
-        pad_df = np.zeros((len(df_final), SCALER_DIM))
-        pad_df[:, :9] = df_final.values
-        scaled_features = feature_scaler.transform(pad_df)[:, :9]
+    scaled_features = scale_feature_values(df_final)
 
     if len(scaled_features) < SEQUENCE_LENGTH:
         return None, f"資料筆數太少，模型需要至少 {SEQUENCE_LENGTH} 筆連續資料才能進行預測。"
@@ -323,7 +438,7 @@ def highlight_health_status(val):
     elif val == "注意":
         return "background-color: #ffc107; color: #000000; font-weight: bold;"
     elif val == "良好":
-        return "background-color: #28a745; color: #ffffff;"
+        return "background-color: #28a745; color: #ffffff; font-weight: bold;"
     return ""
 
 
@@ -341,10 +456,9 @@ def assign_status(pct):
 st.title("馬達狀態預測系統")
 
 if SCALER_DIM != 9:
-    st.error(
-        f"🚨 **嚴重警告：縮放器檔案錯誤！**\n\n"
-        f"系統偵測到 `feature_scaler.pkl` 包含了 **{SCALER_DIM} 個特徵**，"
-        f"但目前模型是用 **9 個特徵** 訓練的。請確認縮放器是否為最新版本。"
+    st.warning(
+        f"⚠️ 系統偵測到 `feature_scaler.pkl` 包含了 **{SCALER_DIM} 個特徵**，"
+        f"目前模型主要使用 **9 個特徵**。系統會嘗試自動處理，但建議確認縮放器是否為最新版本。"
     )
 
 st.markdown(
@@ -640,15 +754,41 @@ with tab2:
 
                         df_display = df_display[cols_to_show]
 
+                        table_styles = [
+                            {
+                                "selector": "th",
+                                "props": [
+                                    ("background-color", "#F8F9FA"),
+                                    ("color", "#111111"),
+                                    ("font-weight", "bold"),
+                                    ("text-align", "left"),
+                                    ("border", "1px solid #E5E7EB")
+                                ]
+                            },
+                            {
+                                "selector": "td",
+                                "props": [
+                                    ("background-color", "#FFFFFF"),
+                                    ("color", "#111111"),
+                                    ("text-align", "left"),
+                                    ("border", "1px solid #E5E7EB")
+                                ]
+                            }
+                        ]
+
                         try:
                             styled_df = (
                                 df_display.style
                                 .set_properties(
                                     **{
                                         "font-size": "16px",
-                                        "text-align": "left"
+                                        "text-align": "left",
+                                        "background-color": "#FFFFFF",
+                                        "color": "#111111",
+                                        "border-color": "#E5E7EB"
                                     }
                                 )
+                                .set_table_styles(table_styles)
                                 .map(
                                     highlight_health_status,
                                     subset=["健康等級"]
@@ -660,9 +800,13 @@ with tab2:
                                 .set_properties(
                                     **{
                                         "font-size": "16px",
-                                        "text-align": "left"
+                                        "text-align": "left",
+                                        "background-color": "#FFFFFF",
+                                        "color": "#111111",
+                                        "border-color": "#E5E7EB"
                                     }
                                 )
+                                .set_table_styles(table_styles)
                                 .applymap(
                                     highlight_health_status,
                                     subset=["健康等級"]
@@ -717,9 +861,20 @@ with tab2:
                                     range=["blue", "red"]
                                 )
                             )
+                        ).properties(
+                            background="#FFFFFF"
+                        ).configure_view(
+                            stroke="#D0D5DD"
+                        ).configure_axis(
+                            labelColor="#111111",
+                            titleColor="#111111",
+                            gridColor="#E5E7EB"
+                        ).configure_legend(
+                            labelColor="#111111",
+                            titleColor="#111111"
                         ).interactive()
 
-                        st.altair_chart(chart, use_container_width=True)
+                        st.altair_chart(chart, use_container_width=True, theme=None)
 
         except Exception as e:
             st.error(f"檔案讀取或處理時發生錯誤: {e}")
